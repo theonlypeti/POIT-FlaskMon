@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Flask-SocketIO Test with Tabs and Gauge</title>
+    <link rel="stylesheet" href="https://code.jquery.com/ui/1.12.1/themes/base/jquery-ui.min.css">
+    <script src="https://code.jquery.com/jquery-3.2.1.min.js"></script>
+    <script src="https://code.jquery.com/ui/1.12.1/jquery-ui.min.js"></script>
+    <script src="//cdnjs.cloudflare.com/ajax/libs/socket.io/3.0.5/socket.io.min.js"></script>
+    <script src="static/libs/plotly-latest.min.js"></script>
+    <script src="static/libs/gauge.min.js"></script>
+    <script>
+        $(function () {
+            $("#tabs").tabs({
+                event: "mouseover"
+            });
+        });
+
+        $(document).ready(function () {
+            var x = new Array();
+            var y = new Array();
+            var ycos = new Array(); // Array for cosine data
+            var traceSine;
+            var traceCosine;
+            var layout;
+            var isReceiving = true; // Initially set to true
+            var startButton = $('#start');
+            var stopButton = $('#stop');
+            var gauge = new RadialGauge({ // Initialize the gauge here
+                renderTo: 'gauge-canvas', // ID of the canvas element in the Gauge tab
+                width: 300,
+                height: 300,
+                units: "Value",
+                minValue: -1,
+                maxValue: 1,
+                majorTicks: [
+                    "-1",
+                    "-0.5",
+                    "0",
+                    "0.5",
+                    "1"
+                ],
+                minorTicks: 2,
+                strokeTicks: true,
+                highlights: [
+                    {
+                        "from": 0.5,
+                        "to": 1,
+                        "color": "rgba(200, 50, 50, .75)"
+                    },
+                    {
+                        "from": -1,
+                        "to": -0.5,
+                        "color": "rgba(50, 50, 200, .75)"
+                    }
+                ],
+                colorPlate: "#fff",
+                borderShadowWidth: 0,
+                borders: false,
+                needleType: "arrow",
+                needleWidth: 2,
+                needleCircleSize: 7,
+                needleCircleOuter: true,
+                needleCircleInner: false,
+                animationDuration: 1500,
+                animationRule: "linear"
+            });
+            gauge.draw();
+            gauge.value = 0;
+
+            namespace = '/test';
+            var socket = io.connect(location.protocol + '//' + document.domain + ':' + location.port + namespace);
+
+            socket.on('connect', function () {
+                socket.emit('my_event', {data: 'I\'m connected!', value: 1});
+            });
+
+            socket.on('my_response', function (msg) {
+                if (isReceiving) {
+                    console.log(msg.data);
+                    $('#log').append('Received #' + msg.count + ': ' + msg.data + '<br>');
+                    try {
+                        var jsonData = JSON.parse(msg.data);
+                        console.log('Parsed JSON:', jsonData);
+                        x.push(jsonData.x);
+                        y.push(jsonData.y);
+                        ycos.push(jsonData.ycos); // Push cosine data to the array
+
+                        traceSine = {
+                            x: x,
+                            y: y,
+                            mode: 'lines',
+                            name: 'Sine' // Name for the legend
+                        };
+
+                        traceCosine = {
+                            x: x,
+                            y: ycos,
+                            mode: 'lines',
+                            name: 'Cosine' // Name for the legend
+                        };
+
+                        layout = {
+                            title: 'Sine and Cosine Waves',
+                            xaxis: {
+                                title: 'x',
+                            },
+                            yaxis: {
+                                title: 'y',
+                                //range: [-1.2, 1.2] // Adjust range to fit sine and cosine
+                            }
+                        };
+                        var traces = new Array();
+                        traces.push(traceSine);
+                        traces.push(traceCosine);
+                        Plotly.newPlot($('#plotdiv')[0], traces, layout);
+
+                        // Update the gauge value with the 'y' value
+                        gauge.value = jsonData.y;
+
+                    } catch (e) {
+                        console.error('Error parsing JSON:', e);
+                        // Still append to log
+                    }
+                }
+            });
+
+            $('form#emit').submit(function (event) {
+                socket.emit('my_event', {value: $('#emit_value').val()});
+                return false;
+            });
+            $('#buttonVal').click(function (event) {
+                //console.log($('#buttonVal').val());
+                socket.emit('click_event', {value: $('#buttonVal').val()});
+                return false;
+            });
+            $('form#disconnect').submit(function (event) {
+                socket.emit('disconnect_request');
+                return false;
+            });
+
+            startButton.click(function () {
+                isReceiving = true;
+                console.log("Start receiving data.");
+            });
+
+            stopButton.click(function () {
+                isReceiving = false;
+                console.log("Stop receiving data.");
+            });
+        });
+    </script>
+</head>
+<body>
+
+<h1>Flask-SocketIO Test</h1>
+<h2>Send:</h2>
+<form id="emit" method="POST" action='#'>
+    <input type="text" name="emit_value" id="emit_value" placeholder="Amplituda">
+    <input type="submit" value="Send">
+</form>
+<button id="buttonVal" type="submit" value="send">Send value</button>
+<form id="disconnect" method="POST" action="#">
+    <input type="submit" value="Disconnect">
+</form>
+<h2>Control Receiving:</h2>
+<button id="start">Start</button>
+<button id="stop">Stop</button>
+
+<div id="tabs">
+    <ul>
+        <li><a href="#tabs-1">Log</a></li>
+        <li><a href="#tabs-2">Plot</a></li>
+        <li><a href="#tabs-3">Gauge</a></li>
+    </ul>
+    <div id="tabs-1">
+        <h2>Receive Log:</h2>
+        <div id="log"></div>
+    </div>
+    <div id="tabs-2">
+        <h2>Plot:</h2>
+        <div id="plotdiv" style="width:600px;height:250px;"></div>
+    </div>
+    <div id="tabs-3">
+        <h2>Gauge:</h2>
+        <canvas id="gauge-canvas"></canvas>
+    </div>
+</div>
+
+
+</body>
+</html>
