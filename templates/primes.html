@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Prime Number Finder</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.socket.io/4.4.1/socket.io.min.js"></script>
+    <script type="text/javascript">
+        $(document).ready(function() {
+            var socket = io.connect(location.protocol + '//' + document.domain + ':' + location.port + '/test');
+            var primesList = $('#primes-list');
+
+            socket.on('prime_status', function(data) {
+                $('#status').text('Status: ' + data.status);
+            });
+
+            socket.on('prime_found', function(data) {
+                $('#prime-count').text(data.count);
+                var li = $('<li>').text(data.prime);
+                primesList.prepend(li);
+                if (primesList.children().length > 50) {
+                    primesList.children().last().remove();
+                }
+            });
+
+            $('#stop-button').click(function() {
+                socket.emit('stop_primes', {});
+            });
+
+            $('#start-button').click(function() {
+            var numProcesses = parseInt($('#num-processes').val()) || 1;
+            socket.emit('start_primes', {processes: numProcesses});
+});
+        });
+    </script>
+</head>
+<body>
+    <h1>Prime Number Finder</h1>
+    <p id="status">Status: not running</p>
+    <p>Primes found: <span id="prime-count">0</span></p>
+    <div>
+    <label for="num-processes">Number of processes:</label>
+    <input type="number" id="num-processes" min="1" value="4">
+    </div>
+    <button id="start-button">Start Finding Primes</button>
+    <button id="stop-button">Stop</button>
+    <h2>Latest Primes</h2>
+    <ul id="primes-list"></ul>
+</body>
+</html>
