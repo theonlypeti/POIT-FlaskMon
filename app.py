@@ -41,10 +41,6 @@ def test_message(message):
     session['A'] = float(message['value']) # Ensure value is a float
     emit('my_response',
          {'data': message['value'], 'count': session['receive_count']})
-         
-@app.route('/graphlive', methods=['GET', 'POST'])
-def graphlive():
-    return render_template('graphlive.html', async_mode=socketio.async_mode)
 
 @socketio.on('disconnect_request', namespace='/test')
 def disconnect_request():

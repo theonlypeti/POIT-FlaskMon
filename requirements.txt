@@ -1,0 +1,5 @@
+HardwareMonitor
+flask-socketio
+coloredlogs
+argparse
+waitress

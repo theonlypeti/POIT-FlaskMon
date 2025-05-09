@@ -1,21 +1,23 @@
-from threading import Lock
 from flask import Flask, render_template, jsonify, request
 from flask_socketio import SocketIO, emit
 import itertools
 from multiprocessing import Pool, cpu_count
 from math import sqrt
-import json
+from hwmon import HardwareMonitor
+from utils import mylogger
+# from waitress import serve
+import time
+
+prime_pool = None
+is_finding_primes = False
+primes_found = []
+connected_clients = 0
+sensor_data = {}
+is_monitoring = False
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'secret!'
 socketio = SocketIO(app)
-
-# Global variables for prime finding
-prime_pool = None
-is_finding_primes = False
-primes_found = []
-thread_lock = Lock()
-
 
 def is_prime(n):
     if n < 2:
@@ -34,9 +36,7 @@ def prime_finder_thread(processes=None):
     global prime_pool, is_finding_primes, primes_found
 
     numgen = itertools.count(100000000001, 2)
-    print(f"37{processes=}")
     cpus = processes or cpu_count()
-    print(f"39{cpus=}")
     primes_found = []
 
     try:
@@ -62,18 +62,12 @@ def prime_finder_thread(processes=None):
                       {'status': 'stopped', 'count': len(primes_found)},
                       namespace='/test')
 
+#
+# @app.route('/')
+# def index():
+#     return render_template('index.html')
 
 @app.route('/')
-def index():
-    return render_template('index.html')
-
-
-@app.route('/graphlive')
-def graphlive():
-    return render_template('graphlive.html')
-
-
-@app.route('/primes')
 def primes_page():
     return render_template('primes.html')
 
@@ -86,10 +80,9 @@ def start_primes():
         return jsonify({'status': 'already_running'})
 
     processes = request.json.get('processes') if request.json else None
-    print(f"89{processes=}")
     if processes:
         processes = max(1, int(processes))
-    print(f"92{processes=}")
+
 
     socketio.start_background_task(prime_finder_thread, processes)
     return jsonify({'status': 'started', 'processes': processes or cpu_count()})
@@ -97,17 +90,13 @@ def start_primes():
 
 @app.route('/api/stop_primes', methods=['POST'])
 def stop_primes():
-    global prime_pool, is_finding_primes
+    primestop()
 
-    if not is_finding_primes:
-        return jsonify({'status': 'not_running'})
-
-    is_finding_primes = False
-    if prime_pool:
-        prime_pool.terminate()
-        prime_pool.join()
-
-    return jsonify({'status': 'stopped', 'primes_found': len(primes_found)})
+@socketio.on('connect', namespace='/test')
+def handle_connect():
+    global connected_clients
+    connected_clients += 1
+    logger.info(f"Client connected. Total clients: {connected_clients}")
 
 
 @socketio.on('start_primes', namespace='/test')
@@ -117,22 +106,41 @@ def socket_start_primes(*args, **kwargs):
     if is_finding_primes:
         emit('prime_status', {'status': 'already_running'})
         return
+    else:
+        emit('prime_status', {'status': 'running'})
 
     # Get processes from arguments or use None to default to CPU count
     processes = None
 
-    print("124", args)
+    logger.info(args)
     if args and isinstance(args[0], dict) and 'processes' in args[0]:
         processes = max(1, int(args[0]['processes']))  # Ensure at least 1
-
-    print(f"127{processes=}")
 
     socketio.start_background_task(prime_finder_thread, processes)
     emit('prime_status', {'status': 'started', 'processes': processes or cpu_count()})
 
 
+@socketio.on('disconnect', namespace='/test')
+def handle_disconnect():
+    global connected_clients, is_finding_primes, prime_pool
+
+    connected_clients = max(0, connected_clients - 1)  # Ensure it doesn't go negative
+    logger.info(f"Client disconnected. Remaining clients: {connected_clients}")
+
+    # Stop prime finding if no clients are connected
+    if connected_clients == 0 and is_finding_primes:
+        logger.info("Stopping prime calculation - all clients disconnected")
+        is_finding_primes = False
+        if prime_pool:
+            prime_pool.terminate()
+            prime_pool.join()
+            prime_pool = None
+
 @socketio.on('stop_primes', namespace='/test')
 def socket_stop_primes(*args, **kwargs):
+    primestop()
+
+def primestop():
     global prime_pool, is_finding_primes
 
     if not is_finding_primes:
@@ -147,5 +155,102 @@ def socket_stop_primes(*args, **kwargs):
     emit('prime_status', {'status': 'stopped', 'count': len(primes_found)})
 
 
+def hardware_monitor_thread():
+    """Background task for monitoring hardware sensors"""
+    global sensor_data, is_monitoring
+    if is_monitoring:
+        return
+    is_monitoring = True
+    logger.info("Starting hardware monitoring")
+    hw_monitor = HardwareMonitor("http://127.0.0.1:8086", logger=logger)
+    logger.info("Hardware monitor initialized")
+    try:
+        while is_monitoring:
+            # Update and get sensor data
+            hw_monitor.update()
+            logger.debug(hw_monitor.data)
+            cpu_temp = 0
+            if hw_monitor.data and hw_monitor.data.get("available"):
+                sensor_data = hw_monitor.data["sensors"]
+
+                # Log some key metrics
+                cpu_temp = hw_monitor.get_cpu_temperature()
+                cpu_load = hw_monitor.get_cpu_load()
+
+                # Calculate active threads
+                active_threads = 0
+                if is_finding_primes and prime_pool:
+                    active_threads = prime_pool._processes
+
+                client_data = {
+                    'cpu_temp': cpu_temp,
+                    'cpu_load': cpu_load,
+                    'active_threads': active_threads
+                }
+
+                # Send data via SocketIO to all connected clients
+                socketio.emit('hardware_data', client_data, namespace='/test')
+            else:
+                logger.warning("Hardware monitoring service not available")
+
+            # Emit to socket clients
+            socketio.emit('sensor_update', sensor_data, namespace='/hwmon')
+            if cpu_temp:
+                logger.log(round(int(cpu_temp) - 40, -1), f"CPU temperature {cpu_temp}")
+            # Sleep for some time before next update
+            time.sleep(1)
+    except Exception as e:
+        logger.error(f"Hardware monitoring error: {e}")
+    finally:
+        is_monitoring = False
+        logger.info("Hardware monitoring stopped")
+
+# Add routes for controlling hardware monitoring
+@app.route('/api/start_monitoring', methods=['POST'])
+def start_monitoring():
+    global is_monitoring
+
+    if is_monitoring:
+        return jsonify({'status': 'already_running'})
+
+    socketio.start_background_task(hardware_monitor_thread)
+    return jsonify({'status': 'started'})
+
+
+@app.route('/api/stop_monitoring', methods=['POST'])
+def stop_monitoring():
+    global is_monitoring
+
+    if not is_monitoring:
+        return jsonify({'status': 'not_running'})
+
+    is_monitoring = False
+    return jsonify({'status': 'stopping'})
+
+
+# Add a route to get the latest sensor data
+@app.route('/api/sensor_data')
+def get_sensor_data():
+    return jsonify(sensor_data)
+
 if __name__ == '__main__':
+    from argparse import ArgumentParser
+    parser = ArgumentParser(description="Flask app with hardware monitoring and prime finder.")
+    parser.add_argument('--logfile', action='store_true', help="Enable logging to file.")
+    parser.add_argument('--debug', action='store_true', help="Enable debug mode.")
+    args = parser.parse_args()
+
+    mainlogger = mylogger.init(args)
+    logger = mainlogger.getChild('flaskapp')
+
+
+    @app.before_request
+    def start_monitoring_once():
+        global is_monitoring
+        if not is_monitoring:
+            socketio.start_background_task(hardware_monitor_thread)
+
+
+    # socketio.start_background_task(hardware_monitor_thread)
+    # serve(app, host='0.0.0.0', port=80)
     socketio.run(app, host="0.0.0.0", port=80, debug=True, allow_unsafe_werkzeug=True)

@@ -4,16 +4,17 @@
     <title>Prime Number Finder</title>
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://cdn.socket.io/4.4.1/socket.io.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
     <script type="text/javascript">
-        $(document).ready(function() {
+
+        $(document).ready(function () {
             var socket = io.connect(location.protocol + '//' + document.domain + ':' + location.port + '/test');
             var primesList = $('#primes-list');
 
-            socket.on('prime_status', function(data) {
+            socket.on('prime_status', function (data) {
                 $('#status').text('Status: ' + data.status);
             });
-
-            socket.on('prime_found', function(data) {
+            socket.on('prime_found', function (data) {
                 $('#prime-count').text(data.count);
                 var li = $('<li>').text(data.prime);
                 primesList.prepend(li);
@@ -22,28 +23,121 @@
                 }
             });
 
-            $('#stop-button').click(function() {
+            $('#stop-button').click(function () {
                 socket.emit('stop_primes', {});
             });
+            $('#start-button').click(function () {
+                var numProcesses = parseInt($('#num-processes').val()) || 1;
+                socket.emit('start_primes', {processes: numProcesses});
+            });
 
-            $('#start-button').click(function() {
-            var numProcesses = parseInt($('#num-processes').val()) || 1;
-            socket.emit('start_primes', {processes: numProcesses});
-});
-        });
+            socket.on('hardware_data', function (data) {
+                console.log('Hardware data:', data);
+
+
+                if ($('#hardware-section').length === 0) {
+                    $('body').append(
+                        '<div id="hardware-section">' +
+                        '<h2>Hardware Monitoring</h2>' +
+                        '<div id="hw-stats">' +
+                        '<p>CPU Temperature: <span id="cpu-temp">--</span>°C</p>' +
+                        '<p>CPU Load: <span id="cpu-load">--</span>%</p>' +
+                        '</div>' +
+                        '<div style="display: flex; flex-wrap: wrap;">' +
+                        '<div id="temp-plot" style="width:400px;height:200px;"></div>' +
+                        '<div id="load-plot" style="width:400px;height:200px;"></div>' +
+                        '<div id="threads-plot" style="width:400px;height:200px;"></div>' +
+                        '</div>' +
+                        '</div>'
+                    );
+
+                    // Initialize data arrays for the plots
+                    window.hwData = {
+                        time: [],
+                        cpuTemp: [],
+                        cpuLoad: [],
+                        activeThreads: []
+                    };
+                }
+
+                // Update text values
+                $('#cpu-temp').text(data.cpu_temp);
+                $('#cpu-load').text(Math.round(data.cpu_load));
+
+                // Update plot data
+                var now = new Date();
+                var timeStr = now.getHours() + ':' +
+                    now.getMinutes().toString().padStart(2, '0') + ':' +
+                    now.getSeconds().toString().padStart(2, '0');
+
+                window.hwData.time.push(timeStr);
+                window.hwData.cpuTemp.push(data.cpu_temp);
+                window.hwData.cpuLoad.push(data.cpu_load);
+                window.hwData.activeThreads.push(data.active_threads || 0);
+
+                // Keep only the most recent 20 points
+                if (window.hwData.time.length > 20) {
+                    window.hwData.time.shift();
+                    window.hwData.cpuTemp.shift();
+                    window.hwData.cpuLoad.shift();
+                    window.hwData.activeThreads.shift();
+                }
+
+                Plotly.newPlot('temp-plot', [{
+                    x: window.hwData.time,
+                    y: window.hwData.cpuTemp,
+                    mode: 'lines+markers',
+                    name: 'CPU Temperature',
+                    line: {color: 'red'},
+
+                }], {
+                    title: 'CPU Temperature (°C)',
+                    margin: {l: 40, r: 10, t: 30, b: 40},
+                    yaxis: {
+                        range: [30, 100]  // Min 0%, Max 100%
+                    }
+                });
+                Plotly.newPlot('load-plot', [{
+                    x: window.hwData.time,
+                    y: window.hwData.cpuLoad,
+                    mode: 'lines+markers',
+                    name: 'CPU Load',
+                    line: {color: 'blue'}
+                }], {
+                    title: 'CPU Load (%)',
+                    margin: {l: 40, r: 10, t: 30, b: 40},
+                    yaxis: {
+                        range: [0, 100]  // Min 0%, Max 100%
+                    }
+                });
+                Plotly.newPlot('threads-plot', [{
+                    x: window.hwData.time,
+                    y: window.hwData.activeThreads,
+                    mode: 'lines+markers',
+                    name: 'Active Threads',
+                    line: {color: 'green'}
+                }], {
+                    title: 'Active Threads',
+                    margin: {l: 40, r: 10, t: 30, b: 40},
+                    yaxis: {
+                        range: [0, 16]  // Min 0%, Max 100%
+                    }
+                });
+            })});
+
     </script>
 </head>
 <body>
-    <h1>Prime Number Finder</h1>
-    <p id="status">Status: not running</p>
-    <p>Primes found: <span id="prime-count">0</span></p>
-    <div>
+<h1>Prime Number Finder</h1>
+<p id="status">Status: not running</p>
+<p>Primes found: <span id="prime-count">0</span></p>
+<div>
     <label for="num-processes">Number of processes:</label>
     <input type="number" id="num-processes" min="1" value="4">
-    </div>
-    <button id="start-button">Start Finding Primes</button>
-    <button id="stop-button">Stop</button>
-    <h2>Latest Primes</h2>
-    <ul id="primes-list"></ul>
+</div>
+<button id="start-button">Start Finding Primes</button>
+<button id="stop-button">Stop</button>
+<h2>Latest Primes</h2>
+<ul id="primes-list"></ul>
 </body>
 </html>
