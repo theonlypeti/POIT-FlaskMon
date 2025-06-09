@@ -7,6 +7,7 @@ from hwmon import HardwareMonitor
 from utils import mylogger
 # from waitress import serve
 import time
+import os
 
 prime_pool = None
 is_finding_primes = False
@@ -14,6 +15,9 @@ primes_found = []
 connected_clients = 0
 sensor_data = {}
 is_monitoring = False
+recording = False
+recorded_measurements = []
+recording_start_time = None
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'secret!'
@@ -77,7 +81,7 @@ def start_primes():
     global is_finding_primes
 
     if is_finding_primes:
-        return jsonify({'status': 'already_running'})
+        return jsonify({'status': 'calculating'})
 
     processes = request.json.get('processes') if request.json else None
     if processes:
@@ -85,7 +89,7 @@ def start_primes():
 
 
     socketio.start_background_task(prime_finder_thread, processes)
-    return jsonify({'status': 'started', 'processes': processes or cpu_count()})
+    return jsonify({'status': 'running', 'processes': processes or cpu_count()})
 
 
 @app.route('/api/stop_primes', methods=['POST'])
@@ -104,7 +108,7 @@ def socket_start_primes(*args, **kwargs):
     global is_finding_primes
 
     if is_finding_primes:
-        emit('prime_status', {'status': 'already_running'})
+        emit('prime_status', {'status': 'calculating'})
         return
     else:
         emit('prime_status', {'status': 'running'})
@@ -117,7 +121,7 @@ def socket_start_primes(*args, **kwargs):
         processes = max(1, int(args[0]['processes']))  # Ensure at least 1
 
     socketio.start_background_task(prime_finder_thread, processes)
-    emit('prime_status', {'status': 'started', 'processes': processes or cpu_count()})
+    emit('prime_status', {'status': 'running', 'processes': processes or cpu_count()})
 
 
 @socketio.on('disconnect', namespace='/test')
@@ -140,11 +144,59 @@ def handle_disconnect():
 def socket_stop_primes(*args, **kwargs):
     primestop()
 
+@socketio.on('start_recording', namespace='/test')
+def start_recording_handler(*args, **kwargs):
+    global recording, recorded_measurements, recording_start_time
+    if recording:
+        emit('recording_status', {'status': 'calculating'})
+        return
+    recording = True
+    recorded_measurements = []
+    recording_start_time = time.time()
+    emit('recording_status', {'status': 'recording_started'})
+
+@socketio.on('save_recording', namespace='/test')
+def save_recording_handler(*args, **kwargs):
+    global recording, recorded_measurements, recording_start_time
+    if not recorded_measurements:
+        emit('recording_status', {'status': 'no_data_to_save'})
+        return
+    import datetime
+    dt = datetime.datetime.fromtimestamp(recording_start_time)
+    os.makedirs('recordings', exist_ok=True)
+    filename = f"recordings/recording_{dt.strftime('%Y-%m-%d_%H-%M-%S')}.json"
+    import json
+    with open(filename, 'w') as f:
+        json.dump(recorded_measurements, f)
+    recording = False
+    emit('recording_status', {'status': 'saved', 'filename': filename})
+
+@socketio.on('load_recording', namespace='/test')
+def load_recording_handler(*args, **kwargs):
+    import glob, json
+    os.makedirs('recordings', exist_ok=True)
+    files = sorted(glob.glob('recordings/recording_*.json'), reverse=True)
+    if not files:
+        emit('recording_status', {'status': 'no_recording_found'})
+        return
+    # Send the list of files to the client
+    emit('recording_files', {'files': [os.path.basename(f) for f in files]})
+    # If a specific file is requested, send its data
+    if args and len(args) > 0 and isinstance(args[0], dict) and 'filename' in args[0]:
+        filename = os.path.join('recordings', args[0]['filename'])
+        if not os.path.exists(filename):
+            emit('recording_status', {'status': 'file_not_found', 'filename': filename})
+            return
+        with open(filename, 'r') as f:
+            data = json.load(f)
+        emit('recording_status', {'status': 'loaded', 'filename': filename})
+        emit('recording_data', {'data': data})
+
 def primestop():
     global prime_pool, is_finding_primes
 
     if not is_finding_primes:
-        emit('prime_status', {'status': 'not_running'})
+        emit('prime_status', {'status': 'waiting'})
         return
 
     is_finding_primes = False
@@ -157,7 +209,7 @@ def primestop():
 
 def hardware_monitor_thread():
     """Background task for monitoring hardware sensors"""
-    global sensor_data, is_monitoring
+    global sensor_data, is_monitoring, recording, recorded_measurements
     if is_monitoring:
         return
     is_monitoring = True
@@ -188,6 +240,13 @@ def hardware_monitor_thread():
                     'active_threads': active_threads
                 }
 
+                # Record if recording is enabled
+                if recording:
+                    recorded_measurements.append({
+                        'timestamp': time.time(),
+                        **client_data
+                    })
+
                 # Send data via SocketIO to all connected clients
                 socketio.emit('hardware_data', client_data, namespace='/test')
             else:
@@ -211,10 +270,10 @@ def start_monitoring():
     global is_monitoring
 
     if is_monitoring:
-        return jsonify({'status': 'already_running'})
+        return jsonify({'status': 'calculating'})
 
     socketio.start_background_task(hardware_monitor_thread)
-    return jsonify({'status': 'started'})
+    return jsonify({'status': 'running'})
 
 
 @app.route('/api/stop_monitoring', methods=['POST'])
@@ -222,7 +281,7 @@ def stop_monitoring():
     global is_monitoring
 
     if not is_monitoring:
-        return jsonify({'status': 'not_running'})
+        return jsonify({'status': 'waiting'})
 
     is_monitoring = False
     return jsonify({'status': 'stopping'})
@@ -254,3 +313,5 @@ if __name__ == '__main__':
     # socketio.start_background_task(hardware_monitor_thread)
     # serve(app, host='0.0.0.0', port=80)
     socketio.run(app, host="0.0.0.0", port=80, debug=True, allow_unsafe_werkzeug=True)
+
+

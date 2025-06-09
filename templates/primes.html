@@ -5,21 +5,81 @@
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://cdn.socket.io/4.4.1/socket.io.min.js"></script>
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="static/libs/gauge.min.js"></script>
     <script type="text/javascript">
 
         $(document).ready(function () {
-            var socket = io.connect(location.protocol + '//' + document.domain + ':' + location.port + '/test');
-            var primesList = $('#primes-list');
+            let socket = io.connect(location.protocol + '//' + document.domain + ':' + location.port + '/test');
+
+            // Status translation function for prettier messages
+            function prettifyStatus(status) {
+                const statusMap = {
+                    // Prime status messages
+                    "not running": "⚪ Idle",
+                    "running": "🟢 Running",
+                    "stopping": "🟠 Stopping...",
+                    "stopped": "🔴 Stopped",
+                    "starting": "🔄 Starting...",
+                    "initializing": "⏳ Initializing...",
+                    "calculating": "🔢 Finding primes...",
+                    "waiting": "⏱️ Waiting...",
+                    "paused": "⏸️ Paused",
+                    "restarting": "🔄 Restarting...",
+                    "error": "❌ Error occurred",
+                    "completed": "✅ Completed",
+
+                    // Recording status messages
+                    "recording_started": "🔴 Recording in progress...",
+                    "saved": "💾 Recording saved successfully",
+                    "loaded": "📂 Recording loaded successfully",
+                    "no_recording_found": "⚠️ No recordings found",
+                    "file_not_found": "❌ File not found",
+
+                    // Archive status messages
+                    "saved_to_file": "💾 Data saved to file",
+                    "saved_to_db": "💾 Data saved to database",
+                    "loaded_from_file": "📂 Data loaded from file",
+                    "loaded_from_db": "📂 Data loaded from database"
+                };
+
+                return statusMap[status] || status;
+            }
+
+            // Utility to set button states
+            function updateRecordingUIState() {
+                if (window.displayingRecording) {
+                    $('#load-recording-button').prop('disabled', true);
+                    $('#recording-dropdown-section').show();
+                } else {
+                    $('#recording-dropdown-section').hide();
+                    $('#load-recording-button').prop('disabled', false);
+                }
+                if (window.isRecording) {
+                    $('#save-recording-button').prop('disabled', false);
+                    $('#load-recording-button').prop('disabled', true);
+                    $('#start-recording-button').prop('disabled', true);
+                } else {
+                    $('#save-recording-button').prop('disabled', true);
+                    $('#start-recording-button').prop('disabled', false);
+                }
+            }
+
+            // Initial state
+            window.isRecording = false;
+            updateRecordingUIState();
 
             socket.on('prime_status', function (data) {
-                $('#status').text('Status: ' + data.status);
+                $('#status').text('Status: ' + prettifyStatus(data.status));
             });
             socket.on('prime_found', function (data) {
                 $('#prime-count').text(data.count);
-                var li = $('<li>').text(data.prime);
-                primesList.prepend(li);
-                if (primesList.children().length > 50) {
-                    primesList.children().last().remove();
+                console.log(data.prime);
+                let li = $('<li>').text(data.prime);
+                console.log(li);
+                $('#primes-list').prepend(li);
+                console.log($('#primes-list'));
+                if ($('#primes-list').children().length > 50) {
+                    $('#primes-list').children().last().remove();
                 }
             });
 
@@ -31,9 +91,220 @@
                 socket.emit('start_primes', {processes: numProcesses});
             });
 
+            // Add recording control buttons
+            $('body').append(
+                '<div id="recording-section" style="margin-top: 20px;">' +
+                '<h2>Recording Controls</h2>' +
+                '<button id="start-recording-button">Start Recording</button>' +
+                '<button id="save-recording-button" disabled="true">Save Recording</button>' +
+                '<button id="load-recording-button">Load Recording</button>' +
+                '<div id="recording-status"></div>' +
+                '</div>'
+            );
+
+            // Add a dropdown for recordings
+            $('body').append('<div id="recording-dropdown-section" style="margin-top:10px; display:none;"><label for="recording-dropdown">Select Recording:</label> <select id="recording-dropdown"></select></div>');
+
+
+
+            // Add these event handlers
+            $('#save-db-button').click(function() {
+                socket.emit('save_to_db', {});
+            });
+
+            $('#save-file-button').click(function() {
+                socket.emit('save_to_file', {});
+            });
+
+            $('#load-archived-button').click(function() {
+                socket.emit('load_archived_data', {});
+            });
+
+            // Recording event handlers
+            $('#start-recording-button').click(function() {
+                window.displayingRecording = false;
+                window.isRecording = true;
+                updateRecordingUIState();
+                // Clear plot data and plots
+                window.hwData = {
+                    time: [],
+                    cpuTemp: [],
+                    cpuLoad: [],
+                    activeThreads: []
+                };
+                Plotly.newPlot('temp-plot', [{x: [], y: [], mode: 'lines+markers', name: 'CPU Temperature', line: {color: 'red'}}], {title: 'CPU Temperature (°C)', margin: {l: 40, r: 10, t: 30, b: 40}, yaxis: { range: [30, 100] }});
+                Plotly.newPlot('load-plot', [{x: [], y: [], mode: 'lines+markers', name: 'CPU Load', line: {color: 'blue'}}], {title: 'CPU Load (%)', margin: {l: 40, r: 10, t: 30, b: 40}, yaxis: { range: [0, 100] }});
+                Plotly.newPlot('threads-plot', [{x: [], y: [], mode: 'lines+markers', name: 'Active Threads', line: {color: 'green'}}], {title: 'Active Threads', margin: {l: 40, r: 10, t: 30, b: 40}, yaxis: { range: [0, 16] }});
+                socket.emit('start_recording', {});
+            });
+            $('#save-recording-button').click(function() {
+                if (!window.isRecording) return;
+                socket.emit('save_recording', {});
+            });
+            $('#load-recording-button').click(function() {
+                window.displayingRecording = true;
+                updateRecordingUIState();
+                socket.emit('load_recording', {});
+            });
+
+            // When Load Recording is clicked, request the list of files
+            $('#load-recording-button').click(function() {
+                window.displayingRecording = true;
+                updateRecordingUIState();
+                socket.emit('load_recording', {});
+            });
+
+            // Track the currently loaded filename
+            window.currentRecordingFile = null;
+
+            // Populate dropdown when receiving file list
+            socket.on('recording_files', function(data) {
+                var files = data.files || [];
+                var $dropdown = $('#recording-dropdown');
+                $dropdown.empty();
+                if (files.length === 0) {
+                    $('#recording-dropdown-section').hide();
+                    $('#recording-status').append('<br>No recordings found.');
+                    updateRecordingUIState();
+                    return;
+                }
+                files.forEach(function(file) {
+                    var selected = (file === window.currentRecordingFile) ? ' selected' : '';
+                    $dropdown.append('<option value="' + file + '"' + selected + '>' + file + '</option>');
+                });
+                $('#recording-dropdown-section').show();
+                updateRecordingUIState();
+            });
+
+            // When user selects a file, load it (even if it's the first one)
+            $('#recording-dropdown').off('change').on('change click', function() {
+                var selected = $(this).val();
+                if (selected) {
+                    window.currentRecordingFile = selected;
+                    socket.emit('load_recording', {filename: selected});
+                }
+            });
+
+            // Add handler for archive status updates
+            socket.on('save_status', function(data) {
+                $('#archive-status').text(prettifyStatus(data.status));
+                if (data.status === 'saved_to_file' && data.filename) {
+                    $('#archive-status').append('<br>Saved to: ' + data.filename);
+                }
+            });
+
+            // When a recording is loaded, update the currentRecordingFile
+            socket.on('recording_status', function(data) {
+                $('#recording-status').text(prettifyStatus(data.status));
+                if (data.filename) {
+                    $('#recording-status').append('<br>File: ' + data.filename);
+                    // Extract just the filename if a path is sent
+                    var fname = data.filename.split(/[\\\/]/).pop();
+                    window.currentRecordingFile = fname;
+                    // Update dropdown selection
+                    $('#recording-dropdown').val(fname);
+                }
+                // If loaded, not recording
+                if (data.status === 'loaded' || data.status === 'no_recording_found' || data.status === 'file_not_found') {
+                    window.isRecording = false;
+                    updateRecordingUIState();
+                }
+                // If recording started
+                if (data.status === 'recording_started') {
+                    window.isRecording = true;
+                    updateRecordingUIState();
+                }
+                // If saved, stop recording
+                if (data.status === 'saved') {
+                    window.isRecording = false;
+                    updateRecordingUIState();
+                }
+            });
+
+            // Display loaded recording data on plots
+            socket.on('recording_data', function(data) {
+                if (!data.data || !Array.isArray(data.data) || data.data.length === 0) {
+                    $('#recording-status').append('<br>No data to display.');
+                    return;
+                }
+                // Prepare arrays for plotting
+                var times = [];
+                var cpuTemps = [];
+                var cpuLoads = [];
+                var activeThreads = [];
+                data.data.forEach(function(entry) {
+                    var date = new Date(entry.timestamp * 1000);
+                    var timeStr = date.getHours() + ':' +
+                        date.getMinutes().toString().padStart(2, '0') + ':' +
+                        date.getSeconds().toString().padStart(2, '0');
+                    times.push(timeStr);
+                    cpuTemps.push(entry.cpu_temp);
+                    cpuLoads.push(entry.cpu_load);
+                    activeThreads.push(entry.active_threads || 0);
+                });
+                // Overwrite global hwData with loaded data only
+                window.hwData = {
+                    time: times,
+                    cpuTemp: cpuTemps,
+                    cpuLoad: cpuLoads,
+                    activeThreads: activeThreads
+                };
+                // Set flag to block live data from being appended
+                window.displayingRecording = true;
+                // Update the plots with all loaded data (no cutoff)
+                Plotly.newPlot('temp-plot', [{
+                    x: window.hwData.time,
+                    y: window.hwData.cpuTemp,
+                    mode: 'lines+markers',
+                    name: 'CPU Temperature',
+                    line: {color: 'red'}
+                }], {
+                    title: 'CPU Temperature (°C)',
+                    margin: {l: 40, r: 10, t: 30, b: 40},
+                    yaxis: { range: [30, 100] }
+                });
+                Plotly.newPlot('load-plot', [{
+                    x: window.hwData.time,
+                    y: window.hwData.cpuLoad,
+                    mode: 'lines+markers',
+                    name: 'CPU Load',
+                    line: {color: 'blue'}
+                }], {
+                    title: 'CPU Load (%)',
+                    margin: {l: 40, r: 10, t: 30, b: 40},
+                    yaxis: { range: [0, 100] }
+                });
+                Plotly.newPlot('threads-plot', [{
+                    x: window.hwData.time,
+                    y: window.hwData.activeThreads,
+                    mode: 'lines+markers',
+                    name: 'Active Threads',
+                    line: {color: 'green'}
+                }], {
+                    title: 'Active Threads',
+                    margin: {l: 40, r: 10, t: 30, b: 40},
+                    yaxis: { range: [0, 16] }
+                });
+                $('#recording-status').append('<br>Recording data loaded and displayed.');
+            });
+
+            // Flag to control live data plotting
+            window.displayingRecording = false;
+
             socket.on('hardware_data', function (data) {
                 console.log('Hardware data:', data);
 
+                // Only update plots if not displaying recording
+                if (window.displayingRecording) {
+                    // Still update gauges and text
+                    $('#cpu-temp').text(data.cpu_temp);
+                    $('#cpu-load').text(Math.round(data.cpu_load));
+                    if (window.tempGauge && window.loadGauge) {
+                        window.tempGauge.value = data.cpu_temp;
+                        window.loadGauge.value = data.cpu_load;
+                    }
+                    return; // Do not append or plot live data
+                }
 
                 if ($('#hardware-section').length === 0) {
                     $('body').append(
@@ -83,6 +354,13 @@
                     window.hwData.activeThreads.shift();
                 }
 
+                // Then in your hardware_data event handler, update the gauge values:
+                // After updating the plot data, add:
+                if (window.tempGauge && window.loadGauge) {
+                    window.tempGauge.value = data.cpu_temp;
+                    window.loadGauge.value = data.cpu_load;
+                }
+
                 Plotly.newPlot('temp-plot', [{
                     x: window.hwData.time,
                     y: window.hwData.cpuTemp,
@@ -123,21 +401,207 @@
                         range: [0, 16]  // Min 0%, Max 100%
                     }
                 });
-            })});
+            });
+
+
+
+            // Inside your $(document).ready function, after initializing the hardware section div
+            if ($('#hardware-section').length === 0) {
+                $('body').append(
+                    '<div id="hardware-section">' +
+                    '<h2>Hardware Monitoring</h2>' +
+                    '<div id="hw-stats">' +
+                    '<p>CPU Temperature: <span id="cpu-temp">--</span>°C</p>' +
+                    '<p>CPU Load: <span id="cpu-load">--</span>%</p>' +
+                    '</div>' +
+                    '<div style="display: flex; flex-wrap: wrap;">' +
+                    '<div id="temp-plot" style="width:400px;height:200px;"></div>' +
+                    '<div id="load-plot" style="width:400px;height:200px;"></div>' +
+                    '<div id="threads-plot" style="width:400px;height:200px;"></div>' +
+                    '</div>' +
+                    '<div style="display: flex; flex-wrap: wrap; margin-top: 20px;">' +
+                    '<div style="width:300px;height:300px;"><canvas id="temp-gauge"></canvas></div>' +
+                    '<div style="width:300px;height:300px;"><canvas id="load-gauge"></canvas></div>' +
+                    '</div>' +
+                    '</div>'
+                );
+
+                // Initialize data arrays for the plots
+                window.hwData = {
+                    time: [],
+                    cpuTemp: [],
+                    cpuLoad: [],
+                    activeThreads: []
+                };
+
+                // Initialize gauges
+                window.tempGauge = new RadialGauge({
+                    renderTo: 'temp-gauge',
+                    width: 300,
+                    height: 300,
+                    units: "°C",
+                    minValue: 30,
+                    maxValue: 100,
+                    majorTicks: ["30", "40", "50", "60", "70", "80", "90", "100"],
+                    minorTicks: 2,
+                    strokeTicks: true,
+                    highlights: [
+                        { "from": 30, "to": 60, "color": "rgba(0, 255, 0, .3)" },
+                        { "from": 60, "to": 80, "color": "rgba(255, 255, 0, .3)" },
+                        { "from": 80, "to": 100, "color": "rgba(255, 0, 0, .3)" }
+                    ],
+                    colorPlate: "#fff",
+                    borderShadowWidth: 0,
+                    borders: false,
+                    needleType: "arrow",
+                    needleWidth: 2,
+                    needleCircleSize: 7,
+                    needleCircleOuter: true,
+                    needleCircleInner: false,
+                    animationDuration: 1000,
+                    animationRule: "linear",
+                    valueBox: true
+                });
+
+                window.loadGauge = new RadialGauge({
+                    renderTo: 'load-gauge',
+                    width: 300,
+                    height: 300,
+                    units: "%",
+                    minValue: 0,
+                    maxValue: 100,
+                    majorTicks: ["0", "10", "20", "30", "40", "50", "60", "70", "80", "90", "100"],
+                    minorTicks: 2,
+                    strokeTicks: true,
+                    highlights: [
+                        { "from": 0, "to": 50, "color": "rgba(0, 255, 0, .3)" },
+                        { "from": 50, "to": 75, "color": "rgba(255, 255, 0, .3)" },
+                        { "from": 75, "to": 100, "color": "rgba(255, 0, 0, .3)" }
+                    ],
+                    colorPlate: "#fff",
+                    borderShadowWidth: 0,
+                    borders: false,
+                    needleType: "arrow",
+                    needleWidth: 2,
+                    needleCircleSize: 7,
+                    needleCircleOuter: true,
+                    needleCircleInner: false,
+                    animationDuration: 1000,
+                    animationRule: "linear",
+                    valueBox: true
+                });
+
+                window.tempGauge.draw();
+                window.loadGauge.draw();
+            }
+
+            $('body').append('<h2>Latest Primes</h2>\n' +
+                '<ul id="primes-list"></ul>');
+        });
 
     </script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: #f7f7fa;
+            margin: 0;
+            padding: 0;
+        }
+        h1, h2 {
+            color: #2c3e50;
+        }
+        #main-content {
+            max-width: 1100px;
+            margin: 30px auto 0 auto;
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+            padding: 32px 40px 24px 40px;
+        }
+        #status, #prime-count, #recording-status, #archive-status {
+            font-weight: 500;
+            color: #34495e;
+        }
+        #recording-section, #data-storage-section, #hardware-section {
+            margin-bottom: 32px;
+        }
+        #recording-section button, #data-storage-section button, .action-button {
+            margin-right: 10px;
+            margin-bottom: 8px;
+            padding: 8px 18px;
+            border-radius: 6px;
+            border: none;
+            background: #3498db;
+            color: #fff;
+            font-size: 1em;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        #recording-section button:disabled, #data-storage-section button:disabled, .action-button:disabled {
+            background: #b2bec3;
+            cursor: not-allowed;
+        }
+        #recording-section button:hover:not(:disabled), #data-storage-section button:hover:not(:disabled), .action-button:hover:not(:disabled) {
+            background: #217dbb;
+        }
+        #recording-dropdown-section {
+            margin-bottom: 24px;
+        }
+        #recording-dropdown {
+            padding: 6px 12px;
+            border-radius: 5px;
+            border: 1px solid #b2bec3;
+            font-size: 1em;
+        }
+        #hardware-section {
+            background: #f2f6fa;
+            border-radius: 10px;
+            padding: 18px 20px 10px 20px;
+            box-shadow: 0 1px 6px rgba(0,0,0,0.04);
+        }
+        #hw-stats {
+            margin-bottom: 10px;
+        }
+        #primes-list-section {
+            background: #f2f6fa;
+            border-radius: 10px;
+            padding: 18px 20px 10px 20px;
+            box-shadow: 0 1px 6px rgba(0,0,0,0.04);
+            margin-top: 40px;
+        }
+        #primes-list {
+            columns: 4 120px;
+            -webkit-columns: 4 120px;
+            -moz-columns: 4 120px;
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            font-family: monospace;
+            font-size: 1em;
+            color: #636e72;
+        }
+        #primes-list li {
+            margin-bottom: 4px;
+        }
+        .input-row {
+            margin-bottom: 18px;
+        }
+        label {
+            font-weight: 500;
+            color: #2c3e50;
+        }
+    </style>
 </head>
 <body>
 <h1>Prime Number Finder</h1>
-<p id="status">Status: not running</p>
+<p id="status">Status: ⚪ Idle</p>
 <p>Primes found: <span id="prime-count">0</span></p>
 <div>
     <label for="num-processes">Number of processes:</label>
     <input type="number" id="num-processes" min="1" value="4">
 </div>
-<button id="start-button">Start Finding Primes</button>
-<button id="stop-button">Stop</button>
-<h2>Latest Primes</h2>
-<ul id="primes-list"></ul>
+<button id="start-button" class="action-button">Start Finding Primes</button>
+<button id="stop-button" class="action-button">Stop</button>
 </body>
 </html>
+
