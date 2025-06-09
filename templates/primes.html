@@ -64,12 +64,38 @@
                 }
             }
 
+            // Add a function to update hardware data buttons state
+            function updateHardwareDataButtonsState() {
+                if (window.appendingHardwareData) {
+                    $('#start-hardware-append-button').prop('disabled', true);
+                    $('#stop-hardware-append-button').prop('disabled', false);
+                } else {
+                    $('#start-hardware-append-button').prop('disabled', false);
+                    $('#stop-hardware-append-button').prop('disabled', true);
+                }
+            }
+
             // Initial state
             window.isRecording = false;
+            window.appendingHardwareData = false; // New flag to control hardware data appending
             updateRecordingUIState();
+            updateHardwareDataButtonsState(); // Initialize the button states
+
+            // Add click handlers for hardware data append control buttons
+            $('#start-hardware-append-button').click(function() {
+                window.appendingHardwareData = true;
+                $('#hardware-append-status').text('Status: 🟢 Monitoring on');
+                updateHardwareDataButtonsState();
+            });
+
+            $('#stop-hardware-append-button').click(function() {
+                window.appendingHardwareData = false;
+                $('#hardware-append-status').text('Status: 🔴 Monitoring off');
+                updateHardwareDataButtonsState();
+            });
 
             socket.on('prime_status', function (data) {
-                $('#status').text('Status: ' + prettifyStatus(data.status));
+                $('#status').text('Prime finding status: ' + prettifyStatus(data.status));
             });
             socket.on('prime_found', function (data) {
                 $('#prime-count').text(data.count);
@@ -93,19 +119,21 @@
 
             // Add recording control buttons
             $('body').append(
+                '<div class="section-divider"></div>' +
                 '<div id="recording-section" style="margin-top: 20px;">' +
                 '<h2>Recording Controls</h2>' +
                 '<button id="start-recording-button">Start Recording</button>' +
                 '<button id="save-recording-button" disabled="true">Save Recording</button>' +
                 '<button id="load-recording-button">Load Recording</button>' +
-                '<div id="recording-status"></div>' +
+                '<div id="recording-status">⚫ Recording inactive</div>' +
                 '</div>'
             );
 
             // Add a dropdown for recordings
             $('body').append('<div id="recording-dropdown-section" style="margin-top:10px; display:none;"><label for="recording-dropdown">Select Recording:</label> <select id="recording-dropdown"></select></div>');
 
-
+            // Add a section divider dynamically
+            $('body').append('<div class="section-divider"></div>');
 
             // Add these event handlers
             $('#save-db-button').click(function() {
@@ -304,6 +332,10 @@
                         window.loadGauge.value = data.cpu_load;
                     }
                     return; // Do not append or plot live data
+                }
+
+                if (!window.appendingHardwareData) {
+                    return; // Respect the appendingHardwareData flag
                 }
 
                 if ($('#hardware-section').length === 0) {
@@ -590,11 +622,30 @@
             font-weight: 500;
             color: #2c3e50;
         }
+        /* Add style for section dividers */
+        .section-divider {
+            height: 1px;
+            background-color: #dfe6e9;
+            margin: 20px 0;
+            width: 100%;
+        }
     </style>
 </head>
 <body>
 <h1>Prime Number Finder</h1>
-<p id="status">Status: ⚪ Idle</p>
+
+<!-- Moved hardware data append control buttons to the top -->
+<div style="margin-bottom: 20px;">
+    <h2>Monitoring Controls</h2>
+    <button id="start-hardware-append-button" class="action-button" disabled>Start Monitoring Data</button>
+    <button id="stop-hardware-append-button" class="action-button">Stop Monitoring Data</button>
+    <p id="hardware-append-status">Status: 🔴 Monitoring off</p>
+</div>
+
+<!-- Section divider -->
+<div class="section-divider"></div>
+
+<p id="status">Prime finding status: ⚪ Idle</p>
 <p>Primes found: <span id="prime-count">0</span></p>
 <div>
     <label for="num-processes">Number of processes:</label>
@@ -602,6 +653,9 @@
 </div>
 <button id="start-button" class="action-button">Start Finding Primes</button>
 <button id="stop-button" class="action-button">Stop</button>
+
+<!-- Section divider before the recording section will be added by JavaScript -->
+
 </body>
 </html>
 
