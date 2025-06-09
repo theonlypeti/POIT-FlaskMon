@@ -17,16 +17,10 @@
                     // Prime status messages
                     "not running": "⚪ Idle",
                     "running": "🟢 Running",
-                    "stopping": "🟠 Stopping...",
                     "stopped": "🔴 Stopped",
-                    "starting": "🔄 Starting...",
-                    "initializing": "⏳ Initializing...",
                     "calculating": "🔢 Finding primes...",
                     "waiting": "⏱️ Waiting...",
                     "paused": "⏸️ Paused",
-                    "restarting": "🔄 Restarting...",
-                    "error": "❌ Error occurred",
-                    "completed": "✅ Completed",
 
                     // Recording status messages
                     "recording_started": "🔴 Recording in progress...",
@@ -75,13 +69,11 @@
                 }
             }
 
-            // Initial state
             window.isRecording = false;
-            window.appendingHardwareData = false; // New flag to control hardware data appending
+            window.appendingHardwareData = false;
             updateRecordingUIState();
             updateHardwareDataButtonsState(); // Initialize the button states
 
-            // Add click handlers for hardware data append control buttons
             $('#start-hardware-append-button').click(function() {
                 window.appendingHardwareData = true;
                 $('#hardware-append-status').text('Status: 🟢 Monitoring on');
@@ -99,11 +91,8 @@
             });
             socket.on('prime_found', function (data) {
                 $('#prime-count').text(data.count);
-                console.log(data.prime);
                 let li = $('<li>').text(data.prime);
-                console.log(li);
                 $('#primes-list').prepend(li);
-                console.log($('#primes-list'));
                 if ($('#primes-list').children().length > 50) {
                     $('#primes-list').children().last().remove();
                 }
@@ -112,12 +101,12 @@
             $('#stop-button').click(function () {
                 socket.emit('stop_primes', {});
             });
+
             $('#start-button').click(function () {
                 var numProcesses = parseInt($('#num-processes').val()) || 1;
                 socket.emit('start_primes', {processes: numProcesses});
             });
 
-            // Add recording control buttons
             $('body').append(
                 '<div class="section-divider"></div>' +
                 '<div id="recording-section" style="margin-top: 20px;">' +
@@ -132,10 +121,8 @@
             // Add a dropdown for recordings
             $('body').append('<div id="recording-dropdown-section" style="margin-top:10px; display:none;"><label for="recording-dropdown">Select Recording:</label> <select id="recording-dropdown"></select></div>');
 
-            // Add a section divider dynamically
             $('body').append('<div class="section-divider"></div>');
 
-            // Add these event handlers
             $('#save-db-button').click(function() {
                 socket.emit('save_to_db', {});
             });
@@ -165,6 +152,7 @@
                 Plotly.newPlot('threads-plot', [{x: [], y: [], mode: 'lines+markers', name: 'Active Threads', line: {color: 'green'}}], {title: 'Active Threads', margin: {l: 40, r: 10, t: 30, b: 40}, yaxis: { range: [0, 16] }});
                 socket.emit('start_recording', {});
             });
+
             $('#save-recording-button').click(function() {
                 if (!window.isRecording) return;
                 socket.emit('save_recording', {});
@@ -213,7 +201,6 @@
                 }
             });
 
-            // Add handler for archive status updates
             socket.on('save_status', function(data) {
                 $('#archive-status').text(prettifyStatus(data.status));
                 if (data.status === 'saved_to_file' && data.filename) {
@@ -221,7 +208,6 @@
                 }
             });
 
-            // When a recording is loaded, update the currentRecordingFile
             socket.on('recording_status', function(data) {
                 $('#recording-status').text(prettifyStatus(data.status));
                 if (data.filename) {
@@ -249,13 +235,11 @@
                 }
             });
 
-            // Display loaded recording data on plots
             socket.on('recording_data', function(data) {
                 if (!data.data || !Array.isArray(data.data) || data.data.length === 0) {
                     $('#recording-status').append('<br>No data to display.');
                     return;
                 }
-                // Prepare arrays for plotting
                 var times = [];
                 var cpuTemps = [];
                 var cpuLoads = [];
@@ -316,15 +300,10 @@
                 $('#recording-status').append('<br>Recording data loaded and displayed.');
             });
 
-            // Flag to control live data plotting
             window.displayingRecording = false;
 
             socket.on('hardware_data', function (data) {
-                console.log('Hardware data:', data);
-
-                // Only update plots if not displaying recording
                 if (window.displayingRecording) {
-                    // Still update gauges and text
                     $('#cpu-temp').text(data.cpu_temp);
                     $('#cpu-load').text(Math.round(data.cpu_load));
                     if (window.tempGauge && window.loadGauge) {
@@ -335,7 +314,7 @@
                 }
 
                 if (!window.appendingHardwareData) {
-                    return; // Respect the appendingHardwareData flag
+                    return;
                 }
 
                 if ($('#hardware-section').length === 0) {
@@ -354,7 +333,6 @@
                         '</div>'
                     );
 
-                    // Initialize data arrays for the plots
                     window.hwData = {
                         time: [],
                         cpuTemp: [],
@@ -363,11 +341,9 @@
                     };
                 }
 
-                // Update text values
                 $('#cpu-temp').text(data.cpu_temp);
                 $('#cpu-load').text(Math.round(data.cpu_load));
 
-                // Update plot data
                 var now = new Date();
                 var timeStr = now.getHours() + ':' +
                     now.getMinutes().toString().padStart(2, '0') + ':' +
@@ -386,8 +362,6 @@
                     window.hwData.activeThreads.shift();
                 }
 
-                // Then in your hardware_data event handler, update the gauge values:
-                // After updating the plot data, add:
                 if (window.tempGauge && window.loadGauge) {
                     window.tempGauge.value = data.cpu_temp;
                     window.loadGauge.value = data.cpu_load;
@@ -398,13 +372,12 @@
                     y: window.hwData.cpuTemp,
                     mode: 'lines+markers',
                     name: 'CPU Temperature',
-                    line: {color: 'red'},
-
+                    line: {color: 'red'}
                 }], {
                     title: 'CPU Temperature (°C)',
                     margin: {l: 40, r: 10, t: 30, b: 40},
                     yaxis: {
-                        range: [30, 100]  // Min 0%, Max 100%
+                        range: [30, 100]
                     }
                 });
                 Plotly.newPlot('load-plot', [{
@@ -430,14 +403,11 @@
                     title: 'Active Threads',
                     margin: {l: 40, r: 10, t: 30, b: 40},
                     yaxis: {
-                        range: [0, 16]  // Min 0%, Max 100%
+                        range: [0, 16]
                     }
                 });
             });
 
-
-
-            // Inside your $(document).ready function, after initializing the hardware section div
             if ($('#hardware-section').length === 0) {
                 $('body').append(
                     '<div id="hardware-section">' +
@@ -458,7 +428,6 @@
                     '</div>'
                 );
 
-                // Initialize data arrays for the plots
                 window.hwData = {
                     time: [],
                     cpuTemp: [],
@@ -466,7 +435,6 @@
                     activeThreads: []
                 };
 
-                // Initialize gauges
                 window.tempGauge = new RadialGauge({
                     renderTo: 'temp-gauge',
                     width: 300,
@@ -622,7 +590,6 @@
             font-weight: 500;
             color: #2c3e50;
         }
-        /* Add style for section dividers */
         .section-divider {
             height: 1px;
             background-color: #dfe6e9;
@@ -634,7 +601,6 @@
 <body>
 <h1>Prime Number Finder</h1>
 
-<!-- Moved hardware data append control buttons to the top -->
 <div style="margin-bottom: 20px;">
     <h2>Monitoring Controls</h2>
     <button id="start-hardware-append-button" class="action-button" disabled>Start Monitoring Data</button>
@@ -642,7 +608,6 @@
     <p id="hardware-append-status">Status: 🔴 Monitoring off</p>
 </div>
 
-<!-- Section divider -->
 <div class="section-divider"></div>
 
 <p id="status">Prime finding status: ⚪ Idle</p>
@@ -652,10 +617,7 @@
     <input type="number" id="num-processes" min="1" value="4">
 </div>
 <button id="start-button" class="action-button">Start Finding Primes</button>
-<button id="stop-button" class="action-button">Stop</button>
-
-<!-- Section divider before the recording section will be added by JavaScript -->
+<button id="stop-button" class="action-button">Stop primes</button>
 
 </body>
 </html>
-

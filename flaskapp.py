@@ -5,7 +5,6 @@ from multiprocessing import Pool, cpu_count
 from math import sqrt
 from hwmon import HardwareMonitor
 from utils import mylogger
-# from waitress import serve
 import time
 import os
 
@@ -34,7 +33,6 @@ def is_prime(n):
         if n % i == 0:
             return 0
     return n
-
 
 def prime_finder_thread(processes=None):
     global prime_pool, is_finding_primes, primes_found
@@ -66,15 +64,9 @@ def prime_finder_thread(processes=None):
                       {'status': 'stopped', 'count': len(primes_found)},
                       namespace='/test')
 
-#
-# @app.route('/')
-# def index():
-#     return render_template('index.html')
-
 @app.route('/')
 def primes_page():
     return render_template('primes.html')
-
 
 @app.route('/api/start_primes', methods=['POST'])
 def start_primes():
@@ -87,10 +79,8 @@ def start_primes():
     if processes:
         processes = max(1, int(processes))
 
-
     socketio.start_background_task(prime_finder_thread, processes)
     return jsonify({'status': 'running', 'processes': processes or cpu_count()})
-
 
 @app.route('/api/stop_primes', methods=['POST'])
 def stop_primes():
@@ -102,7 +92,6 @@ def handle_connect():
     connected_clients += 1
     logger.info(f"Client connected. Total clients: {connected_clients}")
 
-
 @socketio.on('start_primes', namespace='/test')
 def socket_start_primes(*args, **kwargs):
     global is_finding_primes
@@ -113,7 +102,6 @@ def socket_start_primes(*args, **kwargs):
     else:
         emit('prime_status', {'status': 'running'})
 
-    # Get processes from arguments or use None to default to CPU count
     processes = None
 
     logger.info(args)
@@ -122,7 +110,6 @@ def socket_start_primes(*args, **kwargs):
 
     socketio.start_background_task(prime_finder_thread, processes)
     emit('prime_status', {'status': 'running', 'processes': processes or cpu_count()})
-
 
 @socketio.on('disconnect', namespace='/test')
 def handle_disconnect():
@@ -224,8 +211,6 @@ def hardware_monitor_thread():
             cpu_temp = 0
             if hw_monitor.data and hw_monitor.data.get("available"):
                 sensor_data = hw_monitor.data["sensors"]
-
-                # Log some key metrics
                 cpu_temp = hw_monitor.get_cpu_temperature()
                 cpu_load = hw_monitor.get_cpu_load()
 
@@ -246,17 +231,12 @@ def hardware_monitor_thread():
                         'timestamp': time.time(),
                         **client_data
                     })
-
-                # Send data via SocketIO to all connected clients
                 socketio.emit('hardware_data', client_data, namespace='/test')
             else:
                 logger.warning("Hardware monitoring service not available")
-
-            # Emit to socket clients
             socketio.emit('sensor_update', sensor_data, namespace='/hwmon')
             if cpu_temp:
                 logger.log(round(int(cpu_temp) - 40, -1), f"CPU temperature {cpu_temp}")
-            # Sleep for some time before next update
             time.sleep(1)
     except Exception as e:
         logger.error(f"Hardware monitoring error: {e}")
@@ -264,7 +244,6 @@ def hardware_monitor_thread():
         is_monitoring = False
         logger.info("Hardware monitoring stopped")
 
-# Add routes for controlling hardware monitoring
 @app.route('/api/start_monitoring', methods=['POST'])
 def start_monitoring():
     global is_monitoring
@@ -274,7 +253,6 @@ def start_monitoring():
 
     socketio.start_background_task(hardware_monitor_thread)
     return jsonify({'status': 'running'})
-
 
 @app.route('/api/stop_monitoring', methods=['POST'])
 def stop_monitoring():
@@ -286,8 +264,6 @@ def stop_monitoring():
     is_monitoring = False
     return jsonify({'status': 'stopping'})
 
-
-# Add a route to get the latest sensor data
 @app.route('/api/sensor_data')
 def get_sensor_data():
     return jsonify(sensor_data)
@@ -302,7 +278,6 @@ if __name__ == '__main__':
     mainlogger = mylogger.init(args)
     logger = mainlogger.getChild('flaskapp')
 
-
     @app.before_request
     def start_monitoring_once():
         global is_monitoring
@@ -313,5 +288,3 @@ if __name__ == '__main__':
     # socketio.start_background_task(hardware_monitor_thread)
     # serve(app, host='0.0.0.0', port=80)
     socketio.run(app, host="0.0.0.0", port=80, debug=True, allow_unsafe_werkzeug=True)
-
-
